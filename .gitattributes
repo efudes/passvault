@@ -1,0 +1,12 @@
+# ── Linguist language-stats tuning ───────────────────────────────────────────
+# Exclude THIRD-PARTY vendored libraries (not first-party code) from the
+# repository language breakdown. Argon2 is a bundled WASM/JS dependency.
+crypto/vendor/**            linguist-vendored
+**/argon2-bundled.min.js    linguist-vendored
+*.min.js                    linguist-vendored
+
+# Built / generated output should never count toward language stats.
+**/dist/**                  linguist-generated
+
+# Test harness page — documentation, not application code.
+crypto/crypto.test.html     linguist-documentation
