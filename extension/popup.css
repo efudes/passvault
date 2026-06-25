@@ -1,0 +1,18 @@
+/* Extension-popup-only sizing.
+ *
+ * An MV3 toolbar popup has no parent viewport to inherit width from, so a layout
+ * that relies on the window width (vault-web centers #app with max-width:460px
+ * and margin:0 auto) collapses to the narrowest content — a thin vertical strip.
+ * Giving the document an explicit width/height fixes that.
+ *
+ * build.sh links this AFTER vault-web/styles.css inside the packaged extension
+ * ONLY. It is never shipped to the Telegram Mini App (M6), which is served in a
+ * full-width WebView and must stay responsive.
+ */
+html,
+body {
+  width: 380px;
+  min-height: 560px;
+  /* Chrome caps popups at 800x600; staying under it avoids inner scrollbars. */
+  max-height: 600px;
+}

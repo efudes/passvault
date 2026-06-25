@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PassVault — crypto core tests</title>
+    <!-- argon2-browser bundled build defines globalThis.argon2 (self-contained wasm). -->
+    <script src="./vendor/argon2-bundled.min.js"></script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0c0e12;
+        --panel: #14171d;
+        --line: #232831;
+        --fg: #e6e9ef;
+        --muted: #8b94a3;
+        --pass: #3ad29f;
+        --fail: #ff5d6c;
+        --accent: #6ea8fe;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        padding: 32px;
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; letter-spacing: 0.5px; }
+      .sub { color: var(--muted); margin: 0 0 24px; }
+      #banner {
+        padding: 14px 18px;
+        border-radius: 8px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+      }
+      #banner.pass { color: var(--pass); border-color: var(--pass); }
+      #banner.fail { color: var(--fail); border-color: var(--fail); }
+      #banner.running { color: var(--accent); }
+      table { width: 100%; border-collapse: collapse; }
+      th, td {
+        text-align: left;
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      th { color: var(--muted); font-weight: 500; }
+      .status { width: 70px; font-weight: 700; }
+      .status.pass { color: var(--pass); }
+      .status.fail { color: var(--fail); }
+      .detail { color: var(--muted); white-space: pre-wrap; }
+      .time { color: var(--muted); width: 80px; text-align: right; }
+    </style>
+  </head>
+  <body>
+    <h1>PassVault — crypto core tests</h1>
+    <p class="sub">M1 milestone. Must be green (incl. zero-knowledge canary) before M2.</p>
+    <div id="banner" class="running">Running…</div>
+    <table>
+      <thead>
+        <tr>
+          <th class="status">Result</th>
+          <th>Test</th>
+          <th>Detail</th>
+          <th class="time">ms</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <script type="module">
+      import * as cv from "./crypto.js";
+
+      const rows = document.getElementById("rows");
+      const banner = document.getElementById("banner");
+      const results = [];
+      window.__RESULTS__ = results;
+      window.__DONE__ = false;
+
+      function assert(cond, msg) {
+        if (!cond) throw new Error(msg || "assertion failed");
+      }
+      function bytesEq(a, b) {
+        return cv.constantTimeEqual(a, b);
+      }
+
+      async function test(name, fn) {
+        const t0 = performance.now();
+        let ok = true;
+        let detail = "";
+        try {
+          detail = (await fn()) || "ok";
+        } catch (e) {
+          ok = false;
+          detail = String(e && e.stack ? e.message : e);
+        }
+        const ms = (performance.now() - t0).toFixed(0);
+        results.push({ name, ok, detail, ms });
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="status ${ok ? "pass" : "fail"}">${ok ? "PASS" : "FAIL"}</td>
+          <td>${name}</td>
+          <td class="detail"></td>
+          <td class="time">${ms}</td>`;
+        tr.querySelector(".detail").textContent = detail;
+        rows.appendChild(tr);
+      }
+
+      const SAMPLE_ITEMS = [
+        {
+          id: "1",
+          title: "Email",
+          username: "alice@example.com",
+          password: "hunter2-correct-horse",
+          url: "https://mail.example.com",
+          notes: "primary",
+          updatedAt: 1700000000000,
+        },
+        {
+          id: "2",
+          title: "Bank",
+          username: "alice",
+          password: "p@ssw0rd!very#secret",
+          url: "https://bank.example.com",
+          notes: "",
+          updatedAt: 1700000001000,
+        },
+      ];
+
+      // 1. Round-trip: create account -> unlock -> items equal.
+      await test("round-trip: create → unlock → items equal", async () => {
+        const { registration, secrets } = await cv.createAccount(
+          "MasterPass!123",
+          "Alice@Example.com",
+          SAMPLE_ITEMS
+        );
+        // server-bound bundle is exactly what the server would hand back at unlock
+        const bundle = {
+          kdfSalt: registration.kdfSalt,
+          kdfParams: registration.kdfParams,
+          protectedVaultKey: registration.protectedVaultKey,
+          vaultBlob: registration.vaultBlob,
+        };
+        const out = await cv.unlock("MasterPass!123", bundle);
+        assert(
+          JSON.stringify(out.items) === JSON.stringify(SAMPLE_ITEMS),
+          "decrypted items differ from original"
+        );
+        assert(bytesEq(out.vaultKey, secrets.vaultKey), "vaultKey mismatch");
+        assert(registration.email === "alice@example.com", "email not lowercased");
+        return `unlocked ${out.items.length} items`;
+      });
+
+      // 2. Wrong password fails to unwrap with a GCM auth error (no silent garbage).
+      await test("wrong password → GCM auth error (not garbage)", async () => {
+        const { registration } = await cv.createAccount(
+          "CorrectPass#1",
+          "bob@example.com",
+          SAMPLE_ITEMS
+        );
+        const bundle = {
+          kdfSalt: registration.kdfSalt,
+          kdfParams: registration.kdfParams,
+          protectedVaultKey: registration.protectedVaultKey,
+          vaultBlob: registration.vaultBlob,
+        };
+        let threw = false;
+        try {
+          await cv.unlock("WrongPass#1", bundle);
+        } catch (e) {
+          threw = true;
+        }
+        assert(threw, "wrong password did NOT throw — silent garbage risk");
+        return "decryption correctly rejected";
+      });
+
+      // 3. IV uniqueness across N encryptions of identical plaintext.
+      await test("IV uniqueness across 200 encryptions", async () => {
+        const key = cv.randomBytes(32);
+        const N = 200;
+        const ivs = new Set();
+        const cts = new Set();
+        for (let i = 0; i < N; i++) {
+          const b64 = await cv.aesGcmEncrypt(key, new TextEncoder().encode("same"));
+          const raw = cv.fromBase64(b64);
+          ivs.add(cv.toBase64(raw.subarray(0, 12)));
+          cts.add(b64);
+        }
+        assert(ivs.size === N, `IV collision: ${ivs.size}/${N} unique`);
+        assert(cts.size === N, `ciphertext collision: ${cts.size}/${N} unique`);
+        return `${ivs.size}/${N} unique IVs and ciphertexts`;
+      });
+
+      // 4. Recovery round-trip: unwrap via recovery code, set new MP, unlock.
+      await test("recovery: code → unwrap → new MP → unlock", async () => {
+        const { registration, recoveryCode } = await cv.createAccount(
+          "OldMaster$1",
+          "carol@example.com",
+          SAMPLE_ITEMS
+        );
+        // server hands back recovery bundle for /api/recover/prelogin
+        const recoverBundle = {
+          recoverySalt: registration.recoverySalt,
+          kdfParams: registration.kdfParams,
+          recoveryProtectedVaultKey: registration.recoveryProtectedVaultKey,
+        };
+        const { submit, secrets } = await cv.buildRecoverySubmit(
+          recoveryCode,
+          recoverBundle,
+          "BrandNewMaster$2"
+        );
+        // server now stores new {kdf_salt, auth_hash, protected_vault_key}; blob untouched.
+        const newBundle = {
+          kdfSalt: submit.newKdfSalt,
+          kdfParams: registration.kdfParams,
+          protectedVaultKey: submit.newProtectedVaultKey,
+          vaultBlob: registration.vaultBlob,
+        };
+        const out = await cv.unlock("BrandNewMaster$2", newBundle);
+        assert(
+          JSON.stringify(out.items) === JSON.stringify(SAMPLE_ITEMS),
+          "items lost across recovery"
+        );
+        assert(bytesEq(out.vaultKey, secrets.vaultKey), "vaultKey changed in recovery");
+        // wrong recovery code must fail
+        let threw = false;
+        try {
+          await cv.recoverWithCode("WRONG-CODE-0000-0000", recoverBundle);
+        } catch {
+          threw = true;
+        }
+        assert(threw, "wrong recovery code did not throw");
+        return "recovered, re-wrapped, unlocked; wrong code rejected";
+      });
+
+      // 4b. Password change keeps the SAME vaultKey and re-unlocks.
+      await test("password change: re-wrap same vaultKey, unlock", async () => {
+        const { registration } = await cv.createAccount(
+          "FirstPass!9",
+          "dave@example.com",
+          SAMPLE_ITEMS
+        );
+        const opened = await cv.unlock("FirstPass!9", {
+          kdfSalt: registration.kdfSalt,
+          kdfParams: registration.kdfParams,
+          protectedVaultKey: registration.protectedVaultKey,
+          vaultBlob: registration.vaultBlob,
+        });
+        const changed = await cv.changePassword("SecondPass!9", opened.vaultKey);
+        const reopened = await cv.unlock("SecondPass!9", {
+          kdfSalt: changed.kdfSalt,
+          kdfParams: changed.kdfParams,
+          protectedVaultKey: changed.protectedVaultKey,
+          vaultBlob: registration.vaultBlob, // NOT re-encrypted
+        });
+        assert(bytesEq(reopened.vaultKey, opened.vaultKey), "vaultKey changed on pw change");
+        assert(
+          JSON.stringify(reopened.items) === JSON.stringify(SAMPLE_ITEMS),
+          "items lost on pw change"
+        );
+        return "same vaultKey, blob untouched, unlocked with new MP";
+      });
+
+      // 5. ZERO-KNOWLEDGE canary: the literal secret must not appear in any
+      //    server-bound payload.
+      await test("zero-knowledge: canary absent from server payloads", async () => {
+        const CANARY = "S3CRET-CANARY";
+        const items = [
+          {
+            id: "x",
+            title: "Canary",
+            username: "canary-user",
+            password: CANARY,
+            url: "https://example.com",
+            notes: `note containing ${CANARY} inline`,
+            updatedAt: 1700000002000,
+          },
+        ];
+        const { registration } = await cv.createAccount(
+          "ZkMaster!1",
+          "erin@example.com",
+          items
+        );
+        // Every field the client sends to the server:
+        const serverBound = {
+          authHash: registration.authHash,
+          protectedVaultKey: registration.protectedVaultKey,
+          vaultBlob: registration.vaultBlob,
+          recoveryAuthHash: registration.recoveryAuthHash,
+          recoveryProtectedVaultKey: registration.recoveryProtectedVaultKey,
+          recoverySalt: registration.recoverySalt,
+          kdfSalt: registration.kdfSalt,
+        };
+        const wire = JSON.stringify(serverBound);
+        assert(
+          !wire.includes(CANARY),
+          `canary "${CANARY}" leaked into server payload!`
+        );
+        // also assert the canary substrings don't leak (defense against partials)
+        for (const part of [CANARY, "canary-user", "canary"]) {
+          assert(!wire.includes(part), `substring "${part}" leaked into payload`);
+        }
+        // sanity: the canary DOES survive a real unlock (proves the test is meaningful)
+        const out = await cv.unlock("ZkMaster!1", {
+          kdfSalt: registration.kdfSalt,
+          kdfParams: registration.kdfParams,
+          protectedVaultKey: registration.protectedVaultKey,
+          vaultBlob: registration.vaultBlob,
+        });
+        assert(out.items[0].password === CANARY, "canary not recoverable on unlock");
+        return "no plaintext leak; canary recoverable only after client-side unlock";
+      });
+
+      // 6. KDF params are exactly the spec values (no PBKDF2 / weakened params).
+      await test("KDF params match spec exactly (Argon2id 64MiB/t=3/p=1)", async () => {
+        assert(cv.KDF_PARAMS.type === "argon2id", "not argon2id");
+        assert(cv.KDF_PARAMS.mem === 65536, "mem != 64 MiB");
+        assert(cv.KDF_PARAMS.time === 3, "time != 3");
+        assert(cv.KDF_PARAMS.parallelism === 1, "parallelism != 1");
+        assert(cv.KDF_PARAMS.hashLen === 32, "hashLen != 32");
+        return "argon2id mem=65536KiB time=3 p=1 len=32";
+      });
+
+      // 7. Recovery code shape: 128-bit, Crockford base32, grouped.
+      await test("recovery code: 128-bit Crockford, normalizes for KDF", async () => {
+        const code = cv.generateRecoveryCode();
+        const symbols = code.replace(/-/g, "");
+        assert(symbols.length >= 26, `expected >=26 symbols for 128 bits, got ${symbols.length}`);
+        assert(/^[0-9A-HJKMNP-TV-Z-]+$/.test(code), "non-Crockford chars present");
+        // normalization is stable & strips formatting
+        const n1 = cv.normalizeRecoveryCode(code);
+        const n2 = cv.normalizeRecoveryCode(code.toLowerCase().replace(/-/g, " "));
+        assert(n1 === n2, "normalization not stable across formatting");
+        return `code=${code}`;
+      });
+
+      // finalize
+      const passed = results.filter((r) => r.ok).length;
+      const failed = results.length - passed;
+      window.__DONE__ = true;
+      window.__SUMMARY__ = { passed, failed, total: results.length };
+      if (failed === 0) {
+        banner.className = "pass";
+        banner.textContent = `ALL GREEN — ${passed}/${results.length} tests passed`;
+      } else {
+        banner.className = "fail";
+        banner.textContent = `FAILED — ${failed} of ${results.length} tests failing`;
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+[Unit]
+Description=PassVault Telegram bot (Mini App launcher)
+After=network-online.target passvault.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=passvault
+Group=passvault
+WorkingDirectory=__APP_DIR__/bot
+# Reads TELEGRAM_BOT_TOKEN and DOMAIN from the same .env as the backend.
+EnvironmentFile=__APP_DIR__/.env
+ExecStart=__APP_DIR__/bot/.venv/bin/python __APP_DIR__/bot/bot.py
+Restart=on-failure
+RestartSec=5
+
+# --- Hardening (the bot needs no write access anywhere) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

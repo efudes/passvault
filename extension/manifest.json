@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "PassVault",
+  "version": "1.0.0",
+  "description": "Zero-knowledge password manager. Unlock your vault and copy credentials; all encryption and decryption happen locally in this popup.",
+  "action": {
+    "default_title": "PassVault",
+    "default_popup": "vault-web/index.html"
+  },
+  "permissions": ["storage", "clipboardWrite"],
+  "host_permissions": ["https://example.com/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https://example.com"
+  }
+}

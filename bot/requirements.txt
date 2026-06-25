@@ -1,0 +1,4 @@
+# PassVault Telegram bot dependencies (pinned).
+# python-telegram-bot v21 is async and bundles httpx; no other deps needed for
+# the launch-button bot.
+python-telegram-bot==21.6

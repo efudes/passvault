@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>PassVault</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- Argon2id (WASM) — defines globalThis.argon2. Must load before crypto.js. -->
+    <script src="../crypto/vendor/argon2-bundled.min.js"></script>
+    <script src="./config.js"></script>
+    <!-- Telegram Mini App bootstrap. No-op outside Telegram (extension/browser);
+         loads the Telegram SDK only when launched inside a Telegram WebView. -->
+    <script src="./telegram.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <div class="brand">
+        <span class="dot"></span>
+        <h1>QHWTEAPL</h1>
+        <span class="spacer"></span>
+        <button id="navLock" class="iconbtn ghost" title="Lock" hidden>lock</button>
+        <button id="navSettings" class="iconbtn ghost" title="Settings" hidden>⚙</button>
+      </div>
+
+      <!-- LOGIN -->
+      <section class="screen" data-screen="login">
+        <div class="card">
+          <h2>Sign in</h2>
+          <p class="hint">Email + master password. Everything is decrypted on this device.</p>
+          <label>Email</label>
+          <input id="loginEmail" type="email" autocomplete="username" class="mono" />
+          <label>Master password</label>
+          <input id="loginPassword" type="password" autocomplete="current-password" />
+          <div id="loginTotpWrap" hidden>
+            <label>Authenticator code</label>
+            <input id="loginTotp" inputmode="numeric" class="mono" placeholder="123456" />
+          </div>
+          <button id="loginBtn" class="primary full">Unlock vault</button>
+          <div class="err" id="loginErr"></div>
+          <div class="linkrow">
+            No account? <a id="toRegister">Create one</a> ·
+            <a id="toRecover">Recover</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- REGISTER -->
+      <section class="screen" data-screen="register">
+        <div class="card">
+          <h2>Create account</h2>
+          <p class="hint">Your master password is never sent to the server and cannot be reset without your recovery code.</p>
+          <label>Email</label>
+          <input id="regEmail" type="email" autocomplete="username" class="mono" />
+          <label>Master password</label>
+          <input id="regPassword" type="password" autocomplete="new-password" />
+          <label>Confirm master password</label>
+          <input id="regPassword2" type="password" autocomplete="new-password" />
+          <button id="regBtn" class="primary full">Create account</button>
+          <div class="err" id="regErr"></div>
+          <div class="linkrow">Have an account? <a id="toLogin">Sign in</a></div>
+        </div>
+      </section>
+
+      <!-- RECOVERY CODE (shown once) -->
+      <section class="screen" data-screen="recovery">
+        <div class="card">
+          <h2>Save your recovery code</h2>
+          <p class="hint">This is shown <b>once</b>. It's the only way to recover your vault if you forget your master password. We never store it.</p>
+          <div class="code" id="recoveryCode"></div>
+          <div class="warn" style="margin-top:12px">
+            Lost master password <b>and</b> lost recovery code = your data is unrecoverable by design.
+          </div>
+          <label style="margin-top:14px">
+            <input type="checkbox" id="recoveryAck" style="width:auto;vertical-align:middle" />
+            I have saved this code somewhere safe
+          </label>
+          <button id="recoveryDone" class="primary full" disabled>Continue to vault</button>
+        </div>
+      </section>
+
+      <!-- UNLOCK (after auto-lock) -->
+      <section class="screen" data-screen="unlock">
+        <div class="card">
+          <h2>Vault locked</h2>
+          <p class="hint" id="unlockWho"></p>
+          <label>Master password</label>
+          <input id="unlockPassword" type="password" autocomplete="current-password" />
+          <button id="unlockBtn" class="primary full">Unlock</button>
+          <div class="err" id="unlockErr"></div>
+          <div class="linkrow"><a id="unlockSignout">Sign out</a></div>
+        </div>
+      </section>
+
+      <!-- PIN QUICK-UNLOCK (only when a PIN block exists on this device) -->
+      <section class="screen" data-screen="pin">
+        <div class="card">
+          <h2>Quick unlock</h2>
+          <p class="hint" id="pinWho"></p>
+          <label>PIN</label>
+          <input id="pinInput" type="password" inputmode="numeric" autocomplete="off"
+                 maxlength="8" class="mono" placeholder="••••••" />
+          <button id="pinUnlockBtn" class="primary full">Unlock</button>
+          <div class="err" id="pinErr"></div>
+          <div class="linkrow">
+            <a id="pinUsePassword">Use master password</a> ·
+            <a id="pinSignout">Sign out</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- RECOVER WITH CODE (UI ready; backend lands in M7) -->
+      <section class="screen" data-screen="recover">
+        <div class="card">
+          <h2>Recover with code</h2>
+          <p class="hint">Enter your email, recovery code, and a new master password.</p>
+          <label>Email</label>
+          <input id="recEmail" type="email" class="mono" />
+          <label>Recovery code</label>
+          <input id="recCode" class="mono" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-X" />
+          <label>New master password</label>
+          <input id="recNewPw" type="password" autocomplete="new-password" />
+          <button id="recBtn" class="primary full">Recover</button>
+          <div class="err" id="recErr"></div>
+          <div class="linkrow"><a id="recToLogin">Back to sign in</a></div>
+        </div>
+      </section>
+
+      <!-- VAULT -->
+      <section class="screen" data-screen="vault">
+        <div class="toolbar">
+          <input id="search" placeholder="Search…" class="mono" />
+          <button id="addBtn" class="primary iconbtn">+ Add</button>
+        </div>
+        <div class="count" id="vaultCount"></div>
+        <div class="list" id="list"></div>
+        <div class="empty" id="emptyState" hidden>No entries yet. Add your first one.</div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="screen" data-screen="settings">
+        <div class="card">
+          <h2>Settings</h2>
+          <div class="kv"><span class="k">Account</span><span class="v" id="setEmail"></span></div>
+          <div class="kv"><span class="k">Entries</span><span class="v" id="setCount"></span></div>
+          <div class="kv"><span class="k">Vault version</span><span class="v" id="setVersion"></span></div>
+          <div class="kv"><span class="k">Auto-lock</span><span class="v">3 min idle</span></div>
+
+          <hr class="sep" />
+          <h3>Change master password</h3>
+          <p class="hint">Re-encrypts your vault key under a new password. Your recovery code keeps working.</p>
+          <label>New master password</label>
+          <input id="cpNew" type="password" autocomplete="new-password" />
+          <label>Confirm new password</label>
+          <input id="cpNew2" type="password" autocomplete="new-password" />
+          <button id="cpBtn" class="full">Change password</button>
+          <div class="err" id="cpErr"></div>
+
+          <hr class="sep" />
+          <h3>Two-factor (TOTP)</h3>
+          <div class="kv"><span class="k">Status</span><span class="v" id="totpStatus">Disabled</span></div>
+          <button id="totpEnrollBtn" class="full">Enable TOTP</button>
+          <div id="totpEnrollArea" hidden>
+            <p class="hint">Scan with an authenticator app (Google Authenticator, Aegis, …), then enter a code to confirm.</p>
+            <img id="totpQr" alt="TOTP QR code" width="180" height="180"
+                 style="display:block;margin:10px auto;background:#fff;border-radius:8px" />
+            <div class="code" id="totpUri" style="font-size:11px;word-break:break-all"></div>
+            <label>Authenticator code</label>
+            <input id="totpConfirmCode" inputmode="numeric" class="mono" placeholder="123456" />
+            <button id="totpConfirmBtn" class="primary full">Confirm &amp; enable</button>
+          </div>
+          <div id="totpDisableArea" hidden>
+            <label>Authenticator code to disable</label>
+            <input id="totpDisableCode" inputmode="numeric" class="mono" placeholder="123456" />
+            <button id="totpDisableBtn" class="danger full">Disable TOTP</button>
+          </div>
+
+          <hr class="sep" />
+          <h3>Quick unlock (PIN)</h3>
+          <div class="warn" style="margin-top:0">
+            <b>Convenience over security.</b> A short PIN unlocks this device only.
+            It trades a little safety for speed — <b>don't enable it on a shared or
+            untrusted device.</b> After 5 wrong PINs the quick-unlock block is
+            destroyed permanently and you'll need your master password.
+          </div>
+          <div class="kv"><span class="k">Status</span><span class="v" id="pinStatus">Disabled</span></div>
+          <div class="kv"><span class="k">Stored in</span><span class="v mono" id="pinBackend"></span></div>
+          <div id="pinEnableArea">
+            <p class="hint">Choose a 4–8 digit PIN (6 recommended). It encrypts your
+              vault key locally — the PIN itself is never stored.</p>
+            <label>New PIN</label>
+            <input id="pinNew" type="password" inputmode="numeric" autocomplete="off"
+                   maxlength="8" class="mono" placeholder="••••••" />
+            <label>Confirm PIN</label>
+            <input id="pinNew2" type="password" inputmode="numeric" autocomplete="off"
+                   maxlength="8" class="mono" placeholder="••••••" />
+            <button id="pinEnableBtn" class="full">Enable quick unlock</button>
+            <div class="err" id="pinErrSet"></div>
+          </div>
+          <div id="pinDisableArea" hidden>
+            <p class="hint">Quick unlock is on for this device. Disabling erases the
+              encrypted PIN block immediately.</p>
+            <button id="pinDisableBtn" class="danger full">Disable quick unlock</button>
+          </div>
+
+          <hr class="sep" />
+          <h3>Recovery code</h3>
+          <p class="hint">Generate a fresh recovery code. Your previous code stops working immediately. We never store the code itself.</p>
+          <button id="regenRecBtn" class="full">Regenerate recovery code</button>
+
+          <hr class="sep" />
+          <button id="setLock" class="full">Lock now</button>
+          <button id="setSignout" class="ghost full" style="margin-top:8px">Sign out</button>
+          <button id="setBack" class="ghost full" style="margin-top:8px">← Back to vault</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- ADD / EDIT MODAL -->
+    <div class="modal-backdrop" id="editModal">
+      <div class="modal">
+        <h2 id="editTitle">Add entry</h2>
+        <label>Title</label>
+        <input id="fTitle" class="mono" />
+        <label>Username</label>
+        <input id="fUsername" class="mono" autocomplete="off" />
+        <label>Password</label>
+        <div class="row">
+          <input id="fPassword" type="text" class="mono" autocomplete="off" />
+          <button id="fGen" class="iconbtn" title="Generate" style="flex:0 0 auto">gen</button>
+        </div>
+        <label>URL</label>
+        <input id="fUrl" class="mono" />
+        <label>Notes</label>
+        <textarea id="fNotes"></textarea>
+        <div class="row" style="margin-top:16px">
+          <button id="editCancel" class="ghost">Cancel</button>
+          <button id="editSave" class="primary">Save</button>
+        </div>
+        <div class="err" id="editErr"></div>
+      </div>
+    </div>
+
+    <!-- Corner links: download the browser extension + open the Telegram bot.
+         Shown only on the pre-auth screens of the plain web app. app.js hides the
+         whole block inside the Telegram Mini App (where both are meaningless) and
+         hides the download link inside the extension popup (already installed). -->
+    <div id="cornerLinks" class="corner-links" hidden>
+      <a id="dlExtLink" href="https://example.com/download/passvault-extension.zip"
+         download="passvault-extension.zip" title="Download the browser extension">↓ Extension</a>
+      <a id="tgBotLink" href="https://t.me/your_bot" target="_blank"
+         rel="noopener noreferrer" title="Open the Telegram bot">Telegram ↗</a>
+    </div>
+
+    <div id="toast"></div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

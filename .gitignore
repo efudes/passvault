@@ -1,0 +1,45 @@
+# ─── Secrets & user data — MUST NEVER be committed ───────────────────────────
+.env
+.env.local
+.env.*.local
+!deploy/.env.example
+
+# SQLite vault databases (server-side only)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Encrypted offsite backups
+*.age
+*.gpg
+
+# Backup / data directories and generated runtime artifacts
+data/
+backups/
+deploy/backup.run.sh
+*.restored
+*.log
+
+# ─── Python ──────────────────────────────────────────────────────────────────
+.venv/
+**/.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ─── Node (browser extension, M5+) ───────────────────────────────────────────
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Built extension zip published for nginx /download/. A build artifact: rsync'd
+# to the server at deploy time, not version-controlled.
+download/
+
+# ─── OS / editor cruft ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.claude/
